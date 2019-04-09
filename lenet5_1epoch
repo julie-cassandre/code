@@ -1,0 +1,254 @@
+import re
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from numpy import argmax
+from torch.autograd import Variable
+import random
+import math
+import os
+import time
+import numpy as np
+import argparse,sys
+sys.path.append('D:\\bysj\\DataSet\\NONCODE V5\\NONCODEv5_human.fa\\')
+import torch.utils.data as data
+def seq_cut(seq):
+    seq_cut=[]
+    for i in range(0,len(seq)):
+        tmp=[]
+        for j in range(0,len(seq[i]),50):
+            if j<(len(seq[i])-50):
+                seqtmp=seq[i][j:j+50]
+            else:
+                seqtmp=seq[i][-50:]
+            tmp.append(seqtmp)
+        seq_cut.append(tmp)
+    return seq_cut
+def onehot(seq):
+    data = seq
+    #print(data)
+    # define universe of possible input values
+    alphabet = 'ACGT'
+    # define a mapping of chars to integers
+    char_to_int = dict((c, i) for i, c in enumerate(alphabet))
+    #int_to_char = dict((i, c) for i, c in enumerate(alphabet))
+
+    # integer encode input data
+    integer_encoded = [char_to_int[char] for char in data]
+    #print(integer_encoded)
+
+    # one hot encode
+    onehot_encoded = list()
+
+    for value in integer_encoded:
+        letter = [0 for _ in range(len(alphabet))]
+        letter[value] = 1
+        letter = np.array(letter)
+        letter =letter.reshape(1,4)
+        onehot_encoded.append(letter)
+    #print(onehot_encoded)
+    onehotseq = np.array(onehot_encoded)
+    #onehotseq = onehotseq.reshape(1,4)
+    #print(onehotseq)
+    return onehotseq
+def readdata():
+    id_seqs = list()
+    seqs = list() 
+    seq = ""
+    with open('D:\\bysj\\DataSet\\NONCODE V5\\NONCODEv5_human.fa\\NONCODEv5_human.fa', 'r') as fd:#NONCODEv5_human.fa
+        for line in fd:
+            if ">" in line: #Any line with a > is a comment/separator
+                id_seqs.append(line.strip())
+                if seq != "":
+                    seq=onehot(seq)
+                    seqs.append(seq)
+                seq = ""                
+            else:
+                seq += line.strip()
+        if seq != "":
+            seq=onehot(seq)
+            seqs.append(seq)
+        seqss = np.array(seqs)  
+    X = np.array(seqss)
+    X =np.array(X)
+    #X = torch.from_numpy(seqs)
+    #print(len(X))
+    #print(len(X[0]))
+    #print(len(X[0][0]))
+
+    seqslable = list() 
+    for v in id_seqs:
+        with open('D:\\bysj\\DataSet\\NONCODE V5\\NONCODEv5_human.fa\\NONCODEv5_human.lncRNA1.exp', 'r') as fl:#NONCODEv5_human.lncRNA1.exp
+            for line in fl:
+                linestr = line.strip()
+                #print(linestr[0])
+                linestrlist = linestr.split("\t")
+                if linestrlist[0]==v:
+                    del(linestrlist[0])
+                    def safe_float(number):
+                            try:
+                                return float(number)
+                            except:
+                                return 0.0
+                    a_float_list = list(map(safe_float,linestrlist))
+                    a_float_list = list(a_float_list)
+                    seqlable = np.array(a_float_list)
+                    seqslable.append(seqlable)
+    y= np.array(seqslable)
+    return X,y
+ def rdata(X,y,simpler,k,nfold):
+    X=X
+    y=y
+    simpler=simpler
+    #print(simpler, type(simpler), simpler.shape, simpler.dtype)
+    partition=int((len(X)/k)+0.7)
+    testXs=[]
+    testys=[]
+    trainXs=[]
+    trainys=[]
+    for i in simpler[int((partition)*(nfold)+0):int((partition)*(nfold)+partition)]:
+        #print(simpler1, type(simpler1), simpler1.shape, simpler1.dtype)
+        testX=X[i]
+        testXs.append(testX)
+        testy=y[i]
+        testys.append(testy)
+    #testXs=np.array(testXs)
+    for j in np.setdiff1d(simpler,simpler[int((partition)*(nfold)+0):int((partition)*(nfold)+partition)]):
+        trainX=X[j]
+        trainy=y[j]
+        trainXs.append(trainX)
+        trainys.append(trainy)
+        
+    #print(trainXs, type(trainXs))
+  return trainXs,trainys,testXs,testys
+  class LeNet(nn.Module):
+    def __init__(self):
+        super(LeNet, self).__init__()
+        # 1 input image channel, 6 output channels, 5x5 square convolution
+        # kernel
+        self.conv1 = nn.Conv1d(1, 12, 3,1,padding=0)
+        self.conv2 = nn.Conv1d(12, 24, 2)
+        # an affine operation: y = Wx + b
+        
+    def forward(self, x):
+        features = []
+        # Max pooling over a (2, 2) window
+        x =self.conv1(x)
+        x = F.relu(x)
+        features.append(x) # C1
+        x = F.max_pool1d(x, 1)
+        x = F.relu(self.conv2(x))
+        features.append(x) # C3
+        x = F.max_pool1d(x, 1)
+        features.append(x) # S4
+        x = x.view(x.size(0), -1)
+        (b,in_f)=x.shape   # 查看卷积层输出的tensor平铺后的形状
+        self.fc1=nn.Linear(in_f,200)     #全链接层
+        self.fc2=nn.Linear(200,120)
+        self.fc3=nn.Linear(120,24)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        x=F.softmax(x,dim=1)
+
+        #print(x, type(x), x.shape, x.dtype)
+        x= torch.mean(x,0)
+        #print(x, type(x), x.shape, x.dtype)
+            
+        return x
+    
+net = LeNet()
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print('Using device:', device)
+
+net.to(device)
+criterion = nn.MSELoss()
+optimizer = optim.Adam(net.parameters(), lr=1e-3, betas=(0.9, 0.99))
+
+def weight_init(m):
+    if isinstance(m, nn.Conv1d):
+        import math
+        n = m.kernel_size[0]* m.out_channels
+        m.weight.data.normal_(0, math.sqrt(2. / n))
+
+net.apply(weight_init)
+def train(epoch,trainXs,trainys,nfold):
+    total_loss = 0.0
+    X=trainXs
+    y=trainys
+    for i in range(0,len(X)):
+            
+        seqtmp=X[i]
+        #print(seqtmp, type(seqtmp), seqtmp.shape, seqtmp.dtype)
+        ytmp=y[i]
+        #Xv=seqtmp.reshape(1,len(seqtmp),len(seqtmp[0]))
+        Xv=torch.from_numpy(seqtmp).float()
+        #X=torch.from_numpy(Xv)
+        #print(Xv, type(Xv), Xv.shape, Xv.dtype)
+        #yv=ytmp.reshape(1,24,1)
+        yv=torch.from_numpy(ytmp).float()
+        #print(yv, type(yv), yv.shape, yv.dtype)
+#print(X, type(X), X.shape, X.dtype)
+
+
+        input, label =  Xv.to(device),  yv.to(device)
+        # zero the parameter gradients
+        optimizer.zero_grad()
+
+        # forward + backward + optimize
+        output = net(input)
+        loss = criterion(output, label)
+        loss.backward()
+        optimizer.step()
+
+        # print statistics
+        if i!=0 and i % 10000 == 0:
+            total_loss = loss.item()
+            print('[epoch:{},nfold:{},{:5d}] Loss: {:.6f}'.format(
+                epoch + 1,nfold, i, total_loss))
+            total_loss = 0.0
+def test(testXs,testys,nfold):
+    test_loss = 0.0
+    correct = 0
+    totaltest_loss = 0.0
+    with torch.no_grad():
+        X=testXs
+        y=testys
+        for i in range(0,len(X)):
+
+            seqtmp=X[i]
+            #print(seqtmp, type(seqtmp), seqtmp.shape, seqtmp.dtype)
+            ytmp=y[i]
+            #Xv=seqtmp.reshape(1,len(seqtmp),len(seqtmp[0]))
+            Xv=torch.from_numpy(seqtmp).float()
+            #X=torch.from_numpy(Xv)
+            #print(Xv, type(Xv), Xv.shape, Xv.dtype)
+            #yv=ytmp.reshape(1,24,1)
+            yv=torch.from_numpy(ytmp).float()
+            #print(yv, type(yv), yv.shape, yv.dtype)
+            input, label =  Xv.to(device),yv.to(device)
+            output = net(input)
+            #print(output.data, type(output.data),output.data.shape, output.data.dtype)
+            # sum up batch loss
+            totaltest_loss += criterion(output, label)
+            if i!=0 and i % 1000 == 0:
+            #if i % 1 == 0:
+                test_loss = criterion(output, label)
+                print('nfold:{},{:5d} testLoss: {:.6f}'.format(
+                    nfold,i, test_loss))
+                test_loss = 0.0
+        totaltest_loss=totaltest_loss/len(y)
+        print('nfold:{},meantestLoss: {:.6f}'.format(
+                    nfold,totaltest_loss))
+        return totaltest_loss
+ for epoch in range(1):
+    X,y=readdata()
+    test_loss=0.0
+    simpler = np.random.permutation(len(y))
+    for nfold in range(10):
+        trainXs,trainys,testXs,testys=rdata(X,y,simpler,10,nfold)
+        train(epoch,trainXs,trainys,nfold)
+        test_loss+=test(testXs,testys,nfold)
+    print('epoch:{},testLoss: {:.6f}'.format(epoch+1, test_loss/10))
+print('Finished!')
